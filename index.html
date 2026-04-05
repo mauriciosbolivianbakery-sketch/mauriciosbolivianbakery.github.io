@@ -1289,7 +1289,9 @@ padding: 4px 10px;
 .status-badge.pending    { background: rgba(200,151,42,0.15); color: #c8972a; border: 1px solid rgba(200,151,42,0.3); }
 .status-badge.early      { background: rgba(122,158,126,0.15); color: #5a7d5e; border: 1px solid rgba(122,158,126,0.3); }
 .status-badge.picked-up  { background: rgba(58,125,68,0.15); color: #3a7d44; border: 1px solid rgba(58,125,68,0.3); }
-.status-badge.canceled   { background: rgba(224,80,80,0.12); color: #e05050; border: 1px solid rgba(224,80,80,0.25); }
+.status-badge.early-unavailable   { background: rgba(139,90,26,0.15); color: #8b5e2a; border: 1px solid rgba(139,90,26,0.3); }
+.status-badge.picked-up-unavailable { background: rgba(30,100,40,0.12); color: #2d6636; border: 1px solid rgba(30,100,40,0.3); }
+.status-badge.canceled-unavailable  { background: rgba(150,30,30,0.12); color: #902020; border: 1px solid rgba(150,30,30,0.25); }
 
 .order-actions {
 display: flex;
@@ -1312,6 +1314,9 @@ transition: all 0.15s;
 .action-btn.early-btn    { background: transparent; border-color: rgba(122,158,126,0.4); color: #5a7d5e; }
 .action-btn.pickup-btn   { background: transparent; border-color: rgba(58,125,68,0.4); color: #3a7d44; }
 .action-btn.cancel-btn   { background: transparent; border-color: rgba(224,80,80,0.35); color: #e05050; }
+.action-btn.early-unavail-btn      { background: transparent; border-color: rgba(139,90,26,0.4); color: #8b5e2a; }
+.action-btn.pickup-unavail-btn     { background: transparent; border-color: rgba(30,100,40,0.4); color: #2d6636; }
+.action-btn.cancel-unavail-btn     { background: transparent; border-color: rgba(150,30,30,0.35); color: #902020; }
 .action-btn.delete-btn   { background: transparent; border-color: rgba(255,255,255,0.1); color: #7a6858; }
 .action-btn:hover { opacity: 0.75; transform: scale(0.97); }
 
@@ -1606,7 +1611,7 @@ transition: all 0.15s;
     <div class="manager-dash">
       <div class="print-header">
         <h2>🍞 Mauricio's Bakery — Orders</h2>
-        <p>Printed on <script>document.write(new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'}))</script></p>
+        <p>Printed on <span id="print-date"></span></p>
       </div>
       <div class="manager-topbar">
         <div>
@@ -1709,6 +1714,7 @@ transition: all 0.15s;
   };
 
   const PICKUP_ADDRESS = '15029 Oxford Grey, Bradenton, Florida';
+  const SHEET_URL = 'https://script.google.com/macros/s/AKfycbz9LqlF5WeeShilzmrlnI_eXlLMo_1TX-nSHD0lbKkYA3j420vvkdfLXkd5fmMRQDPjkg/exec';
   let msgPref = '';
 
   function selectMsgPref(pref) {
@@ -1732,9 +1738,14 @@ transition: all 0.15s;
     return c.length === _k.length && c.every((v,i) => v === _k[i]);
   }
 
-  /* ══════════════════════════
-     BLOCKING SYSTEM
-  ══════════════════════════ */
+  /* ── Storage with in-memory fallback (works in Claude preview + real browsers) ── */
+  var _memStore = {};
+  function _storeGet(key) {
+    try { return _storeGet(key); } catch(e) { return _memStore[key] || null; }
+  }
+  function _storeSet(key, val) {
+    try { _storeSet(key, val); } catch(e) { _memStore[key] = val; }
+  }
   const MAX_ORDERS_PER_DAY = 5; // legacy, replaced by bread limit below
 
   // Bread counts per combo
@@ -1745,11 +1756,11 @@ transition: all 0.15s;
   };
 
   function getMaxBreads() {
-    try { return parseInt(localStorage.getItem('mb_max_breads') || '5'); } catch(e) { return 5; }
+    try { return parseInt(_storeGet('mb_max_breads') || '5'); } catch(e) { return 5; }
   }
 
   function saveMaxBreads(n) {
-    try { localStorage.setItem('mb_max_breads', String(n)); } catch(e) {}
+    try { _storeSet('mb_max_breads', String(n)); } catch(e) {}
   }
 
   function changeBreadLimit(delta) {
@@ -1763,8 +1774,12 @@ transition: all 0.15s;
 
   function getBreadCountForDate(dateStr) {
     try {
-      var orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      var orders = JSON.parse(_storeGet('mb_orders') || '[]');
       return orders.reduce(function(sum, o) {
+        // Free slots: early, picked-up, canceled
+        // Keep slots: early-unavailable, picked-up-unavailable, canceled-unavailable, pending
+        var status = o.status || 'pending';
+        if (status === 'picked-up' || status === 'early' || status === 'canceled') return sum;
         if (!o.pickupDate) return sum;
         var p = new Date(o.pickupDate);
         if (!isNaN(p) && dateKey(p) === dateStr) {
@@ -1780,16 +1795,16 @@ transition: all 0.15s;
   }
 
   function getManualBlocked() {
-    try { return JSON.parse(localStorage.getItem('mb_blocked') || '[]'); } catch(e) { return []; }
+    try { return JSON.parse(_storeGet('mb_blocked') || '[]'); } catch(e) { return []; }
   }
 
   function saveManualBlocked(arr) {
-    try { localStorage.setItem('mb_blocked', JSON.stringify(arr)); } catch(e) {}
+    try { _storeSet('mb_blocked', JSON.stringify(arr)); } catch(e) {}
   }
 
   function getOrdersForDate(dateStr) {
     try {
-      const orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      const orders = JSON.parse(_storeGet('mb_orders') || '[]');
       return orders.filter(o => {
         // Match pickupDate label to dateStr
         const d = new Date(o.placedAt);
@@ -1809,7 +1824,7 @@ transition: all 0.15s;
   function getOrderCountForDate(dateStr) {
     // Count orders whose pickupDate matches dateStr
     try {
-      const orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      const orders = JSON.parse(_storeGet('mb_orders') || '[]');
       return orders.filter(o => {
         if (!o.pickupDate) return false;
         // pickupDate stored as label like "Monday, April 7, 2025"
@@ -2233,11 +2248,24 @@ transition: all 0.15s;
     }
     if (!combo) return;
 
+    var orderData = { name: name, phone: phone, msgPref: msgPref, combo: currentCombo, items: combo.items, price: combo.price, pickupDate: selectedDate.label, placedAt: new Date().toISOString(), status: 'pending' };
+
+    // Save locally as backup
     try {
-      var existing = JSON.parse(localStorage.getItem('mb_orders') || '[]');
-      existing.push({ name: name, phone: phone, msgPref: msgPref, combo: currentCombo, items: combo.items, price: combo.price, pickupDate: selectedDate.label, placedAt: new Date().toISOString() });
-      localStorage.setItem('mb_orders', JSON.stringify(existing));
+      var existing = JSON.parse(_storeGet('mb_orders') || '[]');
+      existing.push(orderData);
+      _storeSet('mb_orders', JSON.stringify(existing));
     } catch(err) { console.warn(err); }
+
+    // Send to Google Sheets
+    try {
+      fetch(SHEET_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderData)
+      });
+    } catch(err) { console.warn('Sheet sync failed:', err); }
 
     document.getElementById('conf-name').textContent    = name;
     document.getElementById('conf-phone').textContent   = phone;
@@ -2248,7 +2276,12 @@ transition: all 0.15s;
     document.getElementById('confirm-address-text').textContent =
       'Your order is going to be ready to pick up at ' + selectedDate.label + ' at ' + PICKUP_ADDRESS + '. We will text you when the order is ready.';
 
-    window.open('https://www.zellepay.com', '_blank');
+    // Open Zelle — only on real browser, not inside iframe/preview
+    try {
+      if (window.self === window.top) {
+        window.open('https://www.zellepay.com', '_blank');
+      }
+    } catch(e) {}
     showPage('page-confirm');
   }
 
@@ -2258,15 +2291,47 @@ transition: all 0.15s;
   function managerLogin() {
     const pw  = document.getElementById('manager-password').value;
     const err = document.getElementById('manager-login-error');
-    if (_checkPw(pw)) {
+    const btn = document.querySelector('.manager-login-btn');
+
+    if (!pw) { err.textContent = 'Please enter the password.'; return; }
+
+    btn.textContent = 'Checking…';
+    btn.disabled    = true;
+    err.textContent = '';
+
+    // Check password via Google Sheets
+    fetch(SHEET_URL, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'checkPassword', password: pw })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.textContent = 'Sign In →';
+      btn.disabled    = false;
       document.getElementById('manager-password').value = '';
-      err.textContent = '';
-      showPage('page-manager-dash');
-      loadOrders();
-    } else {
-      err.textContent = 'Incorrect password. Try again.';
+      if (data.match) {
+        err.textContent = '';
+        showPage('page-manager-dash');
+        loadOrders();
+      } else {
+        err.textContent = 'Incorrect password. Try again.';
+      }
+    })
+    .catch(function() {
+      // Fallback to local password check if network fails
+      btn.textContent = 'Sign In →';
+      btn.disabled    = false;
       document.getElementById('manager-password').value = '';
-    }
+      if (_checkPw(pw)) {
+        err.textContent = '';
+        showPage('page-manager-dash');
+        loadOrders();
+      } else {
+        err.textContent = 'Incorrect password. Try again.';
+      }
+    });
   }
 
   function doPrint() {
@@ -2283,16 +2348,49 @@ transition: all 0.15s;
     const list = document.getElementById('orders-list');
     list.innerHTML = '<div class="orders-empty"><div class="orders-empty-icon">☕</div><div class="orders-empty-text">Loading orders…</div></div>';
 
-    let orders = [];
-    try {
-      orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
-    } catch(e) { console.warn('Could not load orders:', e); }
+    // Try Google Sheets first, fall back to localStorage
+    fetch(SHEET_URL + '?v=' + Date.now())
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success && data.orders) {
+          renderOrderList(data.orders.reverse()); // newest first
+        } else {
+          loadLocalOrders();
+        }
+      })
+      .catch(function() {
+        loadLocalOrders();
+      });
+  }
 
-    orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
+  function loadLocalOrders() {
+    let orders = [];
+    try { orders = JSON.parse(_storeGet('mb_orders') || '[]'); } catch(e) {}
+    orders.sort((a, b) => new Date(b.placedat || b.placedAt) - new Date(a.placedat || a.placedAt));
+    renderOrderList(orders);
+  }
+
+  function renderOrderList(orders) {
+    const list = document.getElementById('orders-list');
+
+    // Normalize keys — Google Sheets returns lowercase
+    orders = orders.map(function(o) {
+      return {
+        name:       o.name       || o.Name       || '',
+        phone:      o.phone      || o.Phone      || '',
+        msgPref:    o.msgpref    || o.msgPref    || o.TextVia || '',
+        combo:      o.combo      || o.Combo      || '',
+        items:      o.items      || o.Items      || '',
+        price:      parseFloat(o.price || o.Price || 0),
+        pickupDate: o.pickupdate || o.pickupDate || o.PickupDate || '',
+        placedAt:   o.placedat   || o.placedAt   || o.PlacedAt  || '',
+        status:     o.status     || o.Status     || 'pending'
+      };
+    });
 
     const todayStr  = new Date().toDateString();
     const todayOrds = orders.filter(o => new Date(o.placedAt).toDateString() === todayStr);
-    const totalRev  = orders.filter(o => o.status !== 'canceled').reduce((s, o) => s + (o.price || 0), 0);
+    const totalRev  = orders.filter(o => o.status !== 'canceled' && o.status !== 'canceled-unavailable').reduce((s, o) => s + (parseFloat(o.price) || 0), 0);
 
     document.getElementById('stat-total').textContent   = orders.filter(o => o.status !== 'canceled').length;
     document.getElementById('stat-revenue').textContent = '$' + totalRev;
@@ -2304,10 +2402,13 @@ transition: all 0.15s;
     }
 
     const STATUS_LABELS = {
-      'pending':   '🕐 Pending',
-      'early':     '⚡ Picked Up Early',
-      'picked-up': '✅ Order Picked Up',
-      'canceled':  '❌ Canceled'
+      'pending':              '🕐 Pending',
+      'early':                '⚡ Picked Up Early',
+      'early-unavailable':    '⚡ Picked Up Early — Not Available',
+      'picked-up':            '✅ Order Picked Up',
+      'picked-up-unavailable':'✅ Order Picked Up — Not Available',
+      'canceled':             '❌ Canceled',
+      'canceled-unavailable': '❌ Canceled — Not Available'
     };
 
     list.innerHTML = '';
@@ -2334,9 +2435,12 @@ transition: all 0.15s;
             <span class="order-time" style="font-size:10px;opacity:0.5;">${timeStr}</span>
           </div>
           <div class="order-actions">
-            ${status !== 'early'     ? `<button class="action-btn early-btn"  onclick="setOrderStatus(${idx}, 'early')">⚡ Picked Up Early</button>` : ''}
-            ${status !== 'picked-up' ? `<button class="action-btn pickup-btn" onclick="setOrderStatus(${idx}, 'picked-up')">✅ Order Picked Up</button>` : ''}
-            ${status !== 'canceled'  ? `<button class="action-btn cancel-btn" onclick="setOrderStatus(${idx}, 'canceled')">❌ Cancel Order</button>` : ''}
+            ${status !== 'early'                ? `<button class="action-btn early-btn"          onclick="setOrderStatus(${idx}, 'early')">⚡ Picked Up Early</button>` : ''}
+            ${status !== 'early-unavailable'    ? `<button class="action-btn early-unavail-btn"  onclick="setOrderStatus(${idx}, 'early-unavailable')">⚡ Picked Up Early — Not Available</button>` : ''}
+            ${status !== 'picked-up'            ? `<button class="action-btn pickup-btn"         onclick="setOrderStatus(${idx}, 'picked-up')">✅ Order Picked Up</button>` : ''}
+            ${status !== 'picked-up-unavailable'? `<button class="action-btn pickup-unavail-btn" onclick="setOrderStatus(${idx}, 'picked-up-unavailable')">✅ Order Picked Up — Not Available</button>` : ''}
+            ${status !== 'canceled'             ? `<button class="action-btn cancel-btn"         onclick="setOrderStatus(${idx}, 'canceled')">❌ Cancel Order</button>` : ''}
+            ${status !== 'canceled-unavailable' ? `<button class="action-btn cancel-unavail-btn" onclick="setOrderStatus(${idx}, 'canceled-unavailable')">❌ Cancel — Not Available</button>` : ''}
             <button class="action-btn delete-btn" onclick="deleteOrder(${idx})">🗑 Delete</button>
           </div>
         </div>
@@ -2347,27 +2451,34 @@ transition: all 0.15s;
 
   function setOrderStatus(idx, status) {
     try {
-      const orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      const orders = JSON.parse(_storeGet('mb_orders') || '[]');
       // idx is based on sorted order (newest first), so we need to sort first
       orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
       if (orders[idx]) {
         orders[idx].status = status;
         // Re-sort back to original order before saving
-        localStorage.setItem('mb_orders', JSON.stringify(orders));
+        _storeSet('mb_orders', JSON.stringify(orders));
         loadOrders();
-        const labels = { 'early': 'Marked as Picked Up Early', 'picked-up': 'Marked as Picked Up', 'canceled': 'Order Canceled' };
+        const labels = {
+          'early':                'Marked as Picked Up Early — slot is now free',
+          'early-unavailable':    'Marked as Picked Up Early — slot stays reserved',
+          'picked-up':            'Marked as Picked Up — slot is now free',
+          'picked-up-unavailable':'Marked as Picked Up — slot stays reserved',
+          'canceled':             'Order Canceled — slot is now free',
+          'canceled-unavailable': 'Order Canceled — slot stays reserved'
+        };
         showToast(labels[status] || 'Status updated');
       }
     } catch(e) { console.warn(e); }
   }
 
   function deleteOrder(idx) {
-    if (!confirm('Are you sure you want to delete this order? This cannot be undone.')) return;
+    if (!window._mbConfirm('Delete this order? This cannot be undone.')) return;
     try {
-      const orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      const orders = JSON.parse(_storeGet('mb_orders') || '[]');
       orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
       orders.splice(idx, 1);
-      localStorage.setItem('mb_orders', JSON.stringify(orders));
+      _storeSet('mb_orders', JSON.stringify(orders));
       loadOrders();
       showToast('Order deleted');
     } catch(e) { console.warn(e); }
@@ -2395,7 +2506,16 @@ transition: all 0.15s;
   })();
 
   /* Init */
-  try { renderCalendar(); } catch(e) { console.warn(e); }
+  try { renderCalendar(); } catch(e) { console.warn('renderCalendar:', e); }
+  try {
+    var pd = document.getElementById('print-date');
+    if (pd) pd.textContent = new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  } catch(e) {}
+
+  /* Safe confirm that works in iframes */
+  window._mbConfirm = function(msg) {
+    try { return window.confirm(msg); } catch(e) { return true; }
+  };
 </script>
 
 </body>
