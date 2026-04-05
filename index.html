@@ -1274,6 +1274,49 @@ cursor: not-allowed;
 pointer-events: none;
 background: rgba(224,80,80,0.05);
 }
+/* ── ORDER STATUS STYLES ── */
+.status-badge {
+display: inline-flex;
+align-items: center;
+gap: 5px;
+font-size: 10px;
+font-weight: 600;
+letter-spacing: 1.5px;
+text-transform: uppercase;
+border-radius: 100px;
+padding: 4px 10px;
+}
+.status-badge.pending    { background: rgba(200,151,42,0.15); color: #c8972a; border: 1px solid rgba(200,151,42,0.3); }
+.status-badge.early      { background: rgba(122,158,126,0.15); color: #5a7d5e; border: 1px solid rgba(122,158,126,0.3); }
+.status-badge.picked-up  { background: rgba(58,125,68,0.15); color: #3a7d44; border: 1px solid rgba(58,125,68,0.3); }
+.status-badge.canceled   { background: rgba(224,80,80,0.12); color: #e05050; border: 1px solid rgba(224,80,80,0.25); }
+
+.order-actions {
+display: flex;
+flex-wrap: wrap;
+gap: 6px;
+margin-top: 10px;
+}
+.action-btn {
+font-family: ‘DM Sans’, sans-serif;
+font-size: 10px;
+font-weight: 500;
+letter-spacing: 1px;
+text-transform: uppercase;
+border-radius: 100px;
+padding: 5px 12px;
+cursor: pointer;
+border: 1px solid;
+transition: all 0.15s;
+}
+.action-btn.early-btn    { background: transparent; border-color: rgba(122,158,126,0.4); color: #5a7d5e; }
+.action-btn.pickup-btn   { background: transparent; border-color: rgba(58,125,68,0.4); color: #3a7d44; }
+.action-btn.cancel-btn   { background: transparent; border-color: rgba(224,80,80,0.35); color: #e05050; }
+.action-btn.delete-btn   { background: transparent; border-color: rgba(255,255,255,0.1); color: #7a6858; }
+.action-btn:hover { opacity: 0.75; transform: scale(0.97); }
+
+.order-row.status-picked-up { opacity: 0.6; }
+.order-row.status-canceled  { opacity: 0.45; }
 </style>
 
 </head>
@@ -1383,13 +1426,14 @@ background: rgba(224,80,80,0.05);
     <div class="order-subtitle">Almost there — just a few details</div>
   </div>
 
-  <div class="combo-recap">
+  <div class="combo-recap" id="combo-recap">
     <div>
       <div class="recap-combo-name" id="recap-name">–</div>
       <div class="recap-combo-items" id="recap-items">–</div>
     </div>
     <div class="recap-price" id="recap-price">$0</div>
   </div>
+  <div id="combo-unavailable-msg" style="display:none;background:rgba(224,80,80,0.1);border:1px solid rgba(224,80,80,0.3);border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:13px;color:#e05050;letter-spacing:0.3px;"></div>
 
   <!-- Contact info -->
   <div class="form-block">
@@ -1611,13 +1655,27 @@ background: rgba(224,80,80,0.05);
   <!-- Schedule panel -->
   <div class="dash-panel" id="panel-schedule">
     <div class="schedule-wrap">
+
+      <!-- Daily bread limit setting -->
+      <div style="background:#2d1a0e;border:1px solid #c8972a;border-radius:10px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+          <div style="font-size:9px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#c8972a;margin-bottom:4px;">Daily Bread Limit</div>
+          <div style="font-size:12px;color:#d4c4a8;letter-spacing:0.5px;">Days auto-block when this many breads are ordered</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button onclick="changeBreadLimit(-1)" style="width:32px;height:32px;border-radius:50%;background:#1a0f08;border:1px solid #c8972a;color:#c8972a;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">−</button>
+          <span id="bread-limit-display" style="font-family:'Cormorant Garamond',serif;font-size:36px;font-weight:600;color:#fff8ef;min-width:40px;text-align:center;">5</span>
+          <button onclick="changeBreadLimit(1)" style="width:32px;height:32px;border-radius:50%;background:#1a0f08;border:1px solid #c8972a;color:#c8972a;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">+</button>
+        </div>
+      </div>
+
       <div class="schedule-intro">
-        Tap any available day to <strong>block</strong> it — customers won't be able to pick it. Tap a blocked day to <strong>unblock</strong> it. Days with 3 or more orders are automatically blocked 🔒
+        Tap any available day to <strong>block</strong> it — customers won't be able to pick it. Tap a blocked day to <strong>unblock</strong> it. Days auto-block when the bread limit is reached 🔒
       </div>
       <div class="schedule-legend">
         <div class="legend-item"><div class="legend-dot available"></div> Available</div>
         <div class="legend-item"><div class="legend-dot blocked"></div> Blocked by you</div>
-        <div class="legend-item"><div class="legend-dot auto-block"></div> Auto-blocked (5 orders)</div>
+        <div class="legend-item"><div class="legend-dot auto-block"></div> Auto-blocked (limit reached)</div>
         <div class="legend-item"><div class="legend-dot past"></div> Past / Today</div>
       </div>
       <div class="mgr-cal-nav">
@@ -1677,7 +1735,45 @@ background: rgba(224,80,80,0.05);
   /* ══════════════════════════
      BLOCKING SYSTEM
   ══════════════════════════ */
-  const MAX_ORDERS_PER_DAY = 5;
+  const MAX_ORDERS_PER_DAY = 5; // legacy, replaced by bread limit below
+
+  // Bread counts per combo
+  const COMBO_BREADS = {
+    'Morning Glow':         1,
+    "Mauricio's Selection": 2,
+    'Family Bundle':        3
+  };
+
+  function getMaxBreads() {
+    try { return parseInt(localStorage.getItem('mb_max_breads') || '5'); } catch(e) { return 5; }
+  }
+
+  function saveMaxBreads(n) {
+    try { localStorage.setItem('mb_max_breads', String(n)); } catch(e) {}
+  }
+
+  function changeBreadLimit(delta) {
+    var current = getMaxBreads();
+    var next = Math.max(1, current + delta);
+    saveMaxBreads(next);
+    var el = document.getElementById('bread-limit-display');
+    if (el) el.textContent = next;
+    renderMgrCalendar();
+  }
+
+  function getBreadCountForDate(dateStr) {
+    try {
+      var orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      return orders.reduce(function(sum, o) {
+        if (!o.pickupDate) return sum;
+        var p = new Date(o.pickupDate);
+        if (!isNaN(p) && dateKey(p) === dateStr) {
+          return sum + (COMBO_BREADS[o.combo] || 1);
+        }
+        return sum;
+      }, 0);
+    } catch(e) { return 0; }
+  }
 
   function dateKey(d) {
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -1725,10 +1821,10 @@ background: rgba(224,80,80,0.05);
   }
 
   function isDateBlocked(date) {
-    const key = dateKey(date);
-    const manual = getManualBlocked();
+    var key = dateKey(date);
+    var manual = getManualBlocked();
     if (manual.includes(key)) return 'manual';
-    if (getOrderCountForDate(key) >= MAX_ORDERS_PER_DAY) return 'auto';
+    if (getBreadCountForDate(key) >= getMaxBreads()) return 'auto';
     return false;
   }
 
@@ -1742,6 +1838,8 @@ background: rgba(224,80,80,0.05);
     } else {
       document.querySelector('.dash-tab:nth-child(2)').classList.add('active');
       document.getElementById('panel-schedule').classList.add('active');
+      var el = document.getElementById('bread-limit-display');
+      if (el) el.textContent = getMaxBreads();
       renderMgrCalendar();
     }
   }
@@ -1783,7 +1881,8 @@ background: rgba(224,80,80,0.05);
       const key     = dateKey(date);
       const isPast  = date <= today;
       const blocked = isDateBlocked(date);
-      const count   = getOrderCountForDate(key);
+      const count   = getBreadCountForDate(key);
+      const maxB    = getMaxBreads();
 
       const el = document.createElement('div');
       el.className = 'mgr-day';
@@ -1809,7 +1908,7 @@ background: rgba(224,80,80,0.05);
       if (!isPast) {
         const cntEl = document.createElement('div');
         cntEl.className = 'mgr-day-orders';
-        cntEl.textContent = count > 0 ? count + ' order' + (count > 1 ? 's' : '') : '';
+        cntEl.textContent = count > 0 ? count + ' bread' + (count > 1 ? 's' : '') + ' / ' + maxB : '';
         el.appendChild(cntEl);
       }
 
@@ -1956,7 +2055,42 @@ background: rgba(224,80,80,0.05);
     selectedDate = { value: date, label };
     document.getElementById('dc-date-text').textContent = label;
     document.getElementById('date-confirmed').classList.add('show');
+    checkComboAvailability();
     updateProceedBtn();
+  }
+
+  function checkComboAvailability() {
+    var recap      = document.getElementById('combo-recap');
+    var msgEl      = document.getElementById('combo-unavailable-msg');
+    var btn        = document.getElementById('proceed-btn');
+    if (!recap || !msgEl) return;
+    if (!selectedDate || !currentCombo) {
+      recap.style.opacity = '1';
+      msgEl.style.display = 'none';
+      return;
+    }
+    var comboBreads   = COMBO_BREADS[currentCombo] || 1;
+    var dateStr       = dateKey(selectedDate.value);
+    var currentBreads = getBreadCountForDate(dateStr);
+    var maxBreads     = getMaxBreads();
+    var remaining     = maxBreads - currentBreads;
+
+    if (comboBreads > remaining) {
+      recap.style.opacity       = '0.35';
+      recap.style.filter        = 'grayscale(1)';
+      recap.style.pointerEvents = 'none';
+      if (btn) { btn.style.opacity = '0.35'; btn.style.pointerEvents = 'none'; }
+      msgEl.style.display = 'block';
+      msgEl.textContent = remaining <= 0
+        ? '❌ This date is fully booked. Please select another combo or another date.'
+        : '❌ Only ' + remaining + ' bread' + (remaining > 1 ? 's' : '') + ' left on this day — this combo needs ' + comboBreads + '. Please select another combo or another date.';
+    } else {
+      recap.style.opacity       = '1';
+      recap.style.filter        = '';
+      recap.style.pointerEvents = 'all';
+      if (btn) { btn.style.opacity = '1'; btn.style.pointerEvents = 'all'; }
+      msgEl.style.display = 'none';
+    }
   }
 
   function clearDate() {
@@ -1966,6 +2100,12 @@ background: rgba(224,80,80,0.05);
     document.getElementById('cal-trigger-btn').classList.remove('selected');
     document.getElementById('cal-trigger-text').textContent = 'Choose a specific date';
     document.getElementById('date-confirmed').classList.remove('show');
+    var recap = document.getElementById('combo-recap');
+    var msgEl = document.getElementById('combo-unavailable-msg');
+    var btn   = document.getElementById('proceed-btn');
+    if (recap) { recap.style.opacity = '1'; recap.style.filter = ''; }
+    if (msgEl) msgEl.style.display = 'none';
+    if (btn)   { btn.style.opacity = '1'; btn.style.pointerEvents = 'all'; }
     renderCalendar(); updateProceedBtn();
   }
 
@@ -2067,8 +2207,30 @@ background: rgba(224,80,80,0.05);
       return;
     }
 
-    // All good — save order and open Zelle
-    var combo = COMBOS[currentCombo];
+    // Check if this order would exceed the bread limit for the selected date
+    var comboBreads = COMBO_BREADS[currentCombo] || 1;
+    var dateStr     = dateKey(selectedDate.value);
+    var currentBreads = getBreadCountForDate(dateStr);
+    var maxBreads   = getMaxBreads();
+
+    if (currentBreads + comboBreads > maxBreads) {
+      var remaining = maxBreads - currentBreads;
+      var panel = document.querySelector('.form-block:last-of-type');
+      if (panel) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        panel.style.outline = '2px solid #e05050';
+        panel.style.outlineOffset = '3px';
+        setTimeout(function() { panel.style.outline = ''; panel.style.outlineOffset = ''; }, 3000);
+      }
+      if (remaining <= 0) {
+        showToast('Sorry — ' + selectedDate.label.split(',')[0] + ' is fully booked! Please select another combo or another date.');
+      } else {
+        showToast('Only ' + remaining + ' bread' + (remaining > 1 ? 's' : '') + ' left on that day. Please select another combo or another date.');
+      }
+      // Also clear the selected date so they must pick again
+      clearDate();
+      return;
+    }
     if (!combo) return;
 
     try {
@@ -2124,51 +2286,91 @@ background: rgba(224,80,80,0.05);
     let orders = [];
     try {
       orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
-    } catch(e) {
-      console.warn('Could not load orders:', e);
-    }
+    } catch(e) { console.warn('Could not load orders:', e); }
 
-    // Sort newest first
     orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
 
-    // Stats
-    const todayStr = new Date().toDateString();
-    const todayOrders = orders.filter(o => new Date(o.placedAt).toDateString() === todayStr);
-    const totalRev = orders.reduce((s, o) => s + (o.price || 0), 0);
+    const todayStr  = new Date().toDateString();
+    const todayOrds = orders.filter(o => new Date(o.placedAt).toDateString() === todayStr);
+    const totalRev  = orders.filter(o => o.status !== 'canceled').reduce((s, o) => s + (o.price || 0), 0);
 
-    document.getElementById('stat-total').textContent   = orders.length;
+    document.getElementById('stat-total').textContent   = orders.filter(o => o.status !== 'canceled').length;
     document.getElementById('stat-revenue').textContent = '$' + totalRev;
-    document.getElementById('stat-today').textContent   = todayOrders.length;
+    document.getElementById('stat-today').textContent   = todayOrds.filter(o => o.status !== 'canceled').length;
 
     if (orders.length === 0) {
       list.innerHTML = '<div class="orders-empty"><div class="orders-empty-icon">☕</div><div class="orders-empty-text">No orders yet — they\'ll show up here once customers place them.</div></div>';
       return;
     }
 
+    const STATUS_LABELS = {
+      'pending':   '🕐 Pending',
+      'early':     '⚡ Picked Up Early',
+      'picked-up': '✅ Order Picked Up',
+      'canceled':  '❌ Canceled'
+    };
+
     list.innerHTML = '';
-    for (const o of orders) {
+    orders.forEach((o, idx) => {
       const placedDate = new Date(o.placedAt);
-      const timeStr = placedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · ' +
-                      placedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const timeStr    = placedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · ' +
+                         placedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const status     = o.status || 'pending';
+      const msgPrefIcon = o.msgPref === 'whatsapp' ? '💬' : o.msgPref === 'imessage' ? '📱' : '';
 
       const row = document.createElement('div');
-      row.className = 'order-row';
+      row.className = 'order-row status-' + status;
       row.innerHTML = `
-        <div class="order-row-left">
-          <div class="order-row-name">${o.name}</div>
-          <div class="order-row-phone">📞 ${o.phone}</div>
-          <div class="order-row-meta">
-            <span class="order-tag combo">🧺 ${o.combo}</span>
-            <span class="order-tag">📅 Pickup: ${o.pickupDate}</span>
+        <div class="order-row-left" style="width:100%;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+            <div class="order-row-name">${o.name}</div>
+            <span class="status-badge ${status}">${STATUS_LABELS[status] || status}</span>
           </div>
-        </div>
-        <div class="order-row-right">
-          <div class="order-price">$${o.price}</div>
-          <div class="order-time">Ordered ${timeStr}</div>
+          <div class="order-row-phone">${msgPrefIcon} 📞 ${o.phone}</div>
+          <div class="order-row-meta" style="margin-bottom:6px;">
+            <span class="order-tag combo">🧺 ${o.combo}</span>
+            <span class="order-tag">📅 ${o.pickupDate}</span>
+            <span class="order-tag" style="color:#c8972a;">$${o.price}</span>
+            <span class="order-time" style="font-size:10px;opacity:0.5;">${timeStr}</span>
+          </div>
+          <div class="order-actions">
+            ${status !== 'early'     ? `<button class="action-btn early-btn"  onclick="setOrderStatus(${idx}, 'early')">⚡ Picked Up Early</button>` : ''}
+            ${status !== 'picked-up' ? `<button class="action-btn pickup-btn" onclick="setOrderStatus(${idx}, 'picked-up')">✅ Order Picked Up</button>` : ''}
+            ${status !== 'canceled'  ? `<button class="action-btn cancel-btn" onclick="setOrderStatus(${idx}, 'canceled')">❌ Cancel Order</button>` : ''}
+            <button class="action-btn delete-btn" onclick="deleteOrder(${idx})">🗑 Delete</button>
+          </div>
         </div>
       `;
       list.appendChild(row);
-    }
+    });
+  }
+
+  function setOrderStatus(idx, status) {
+    try {
+      const orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      // idx is based on sorted order (newest first), so we need to sort first
+      orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
+      if (orders[idx]) {
+        orders[idx].status = status;
+        // Re-sort back to original order before saving
+        localStorage.setItem('mb_orders', JSON.stringify(orders));
+        loadOrders();
+        const labels = { 'early': 'Marked as Picked Up Early', 'picked-up': 'Marked as Picked Up', 'canceled': 'Order Canceled' };
+        showToast(labels[status] || 'Status updated');
+      }
+    } catch(e) { console.warn(e); }
+  }
+
+  function deleteOrder(idx) {
+    if (!confirm('Are you sure you want to delete this order? This cannot be undone.')) return;
+    try {
+      const orders = JSON.parse(localStorage.getItem('mb_orders') || '[]');
+      orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
+      orders.splice(idx, 1);
+      localStorage.setItem('mb_orders', JSON.stringify(orders));
+      loadOrders();
+      showToast('Order deleted');
+    } catch(e) { console.warn(e); }
   }
 
   /* ── Toast ── */
