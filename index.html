@@ -434,9 +434,9 @@ body.printing #panel-orders{display:block !important;}
       </div>
     </div>
     <div class="proceed-wrap">
-      <button id="proceed-btn" onclick="handleProceed()" style="display:inline-flex;align-items:center;gap:10px;background:#22c55e;border:none;color:#fff;font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:18px 48px;cursor:pointer;border-radius:100px;box-shadow:0 6px 24px rgba(34,197,94,0.4);transition:all 0.2s;">
+      <a id="proceed-btn" href="https://www.zellepay.com" target="_blank" rel="noopener" onclick="return handleProceed(event)" style="display:inline-flex;align-items:center;gap:10px;background:#22c55e;border:none;color:#fff;font-family:'Outfit',sans-serif;font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;padding:18px 48px;cursor:pointer;border-radius:100px;box-shadow:0 6px 24px rgba(34,197,94,0.4);transition:all 0.2s;text-decoration:none;">
         Pay with Zelle →
-      </button>
+      </a>
       <div class="proceed-note">Zelle to Walter Lopez · <span id="zelle-email-proceed"></span></div>
     </div>
   </div>
@@ -1008,64 +1008,69 @@ body.printing #panel-orders{display:block !important;}
     if (e.target.id === 'customer-name' || e.target.id === 'customer-phone') updateProceedBtn();
   });
 
-  function handleProceed() {
+  function handleProceed(e) {
     const nameEl  = document.getElementById('customer-name');
     const phoneEl = document.getElementById('customer-phone');
     const name    = nameEl.value.trim();
     const phone   = phoneEl.value.trim();
 
-    // Reset styles first
+    // Reset styles
     nameEl.style.borderColor  = '';
     nameEl.style.background   = '';
     phoneEl.style.borderColor = '';
     phoneEl.style.background  = '';
 
     if (!name) {
+      e.preventDefault();
       nameEl.style.borderColor = '#e05050';
       nameEl.style.background  = 'rgba(224,80,80,0.07)';
       nameEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       nameEl.focus();
       showToast('Name is required');
-      return;
+      return false;
     }
 
     if (!phone) {
+      e.preventDefault();
       phoneEl.style.borderColor = '#e05050';
       phoneEl.style.background  = 'rgba(224,80,80,0.07)';
       phoneEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       phoneEl.focus();
       showToast('Phone number is required');
-      return;
+      return false;
     }
 
     if (!msgPref) {
+      e.preventDefault();
       const btns = document.getElementById('msg-whatsapp');
       if (btns) btns.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const err = document.getElementById('msg-pref-error');
       if (err) err.textContent = '⚠️ Please choose how we should text you';
       showToast('Please choose WhatsApp or iMessage');
-      return;
+      return false;
     }
 
     if (!selectedDate) {
+      e.preventDefault();
       const panel = document.querySelector('.form-block:last-of-type');
       if (panel) {
         panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        panel.style.outline       = '2px solid #e05050';
+        panel.style.outline = '2px solid #e05050';
         panel.style.outlineOffset = '3px';
         setTimeout(function() { panel.style.outline = ''; panel.style.outlineOffset = ''; }, 2500);
       }
       showToast('Please select a pickup date');
-      return;
+      return false;
     }
 
-    // Check if this order would exceed the bread limit for the selected date
-    var comboBreads = COMBO_BREADS[currentCombo] || 1;
-    var dateStr     = dateKey(selectedDate.value);
+    // Check bread limit
+    var comboBreads   = COMBO_BREADS[currentCombo] || 1;
+    var dateStr       = dateKey(selectedDate.value);
     var currentBreads = getBreadCountForDate(dateStr);
-    var maxBreads   = getMaxBreads();
+    var maxBreads     = getMaxBreads();
 
     if (currentBreads + comboBreads > maxBreads) {
+      e.preventDefault();
       var remaining = maxBreads - currentBreads;
       var panel = document.querySelector('.form-block:last-of-type');
       if (panel) {
@@ -1074,34 +1079,27 @@ body.printing #panel-orders{display:block !important;}
         panel.style.outlineOffset = '3px';
         setTimeout(function() { panel.style.outline = ''; panel.style.outlineOffset = ''; }, 3000);
       }
-      if (remaining <= 0) {
-        showToast('Sorry — ' + selectedDate.label.split(',')[0] + ' is fully booked! Please select another combo or another date.');
-      } else {
-        showToast('Only ' + remaining + ' bread' + (remaining > 1 ? 's' : '') + ' left on that day. Please select another combo or another date.');
-      }
-      // Also clear the selected date so they must pick again
+      showToast(remaining <= 0
+        ? 'Sorry — ' + selectedDate.label.split(',')[0] + ' is fully booked! Please select another combo or another date.'
+        : 'Only ' + remaining + ' bread' + (remaining > 1 ? 's' : '') + ' left. Please select another combo or another date.');
       clearDate();
-      return;
+      return false;
     }
-    if (!combo) return;
+
+    // All good — save order, let the href fire naturally to Zelle
+    var combo = COMBOS[currentCombo];
+    if (!combo) { e.preventDefault(); return false; }
 
     var orderData = { name: name, phone: phone, msgPref: msgPref, combo: currentCombo, items: combo.items, price: combo.price, pickupDate: selectedDate.label, placedAt: new Date().toISOString(), status: 'pending' };
 
-    // Save locally as backup
     try {
       var existing = JSON.parse(_storeGet('mb_orders') || '[]');
       existing.push(orderData);
       _storeSet('mb_orders', JSON.stringify(existing));
     } catch(err) { console.warn(err); }
 
-    // Send to Google Sheets
     try {
-      fetch(SHEET_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData)
-      });
+      fetch(SHEET_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(orderData) });
     } catch(err) { console.warn('Sheet sync failed:', err); }
 
     document.getElementById('conf-name').textContent    = name;
@@ -1113,12 +1111,11 @@ body.printing #panel-orders{display:block !important;}
     document.getElementById('confirm-address-text').textContent =
       'Your order is going to be ready to pick up at ' + selectedDate.label + ' at ' + PICKUP_ADDRESS + '. We will text you when the order is ready.';
 
-    // Open Zelle
-    try {
-      var w = window.open('https://www.zellepay.com', '_blank');
-      if (!w) window.location.href = 'https://www.zellepay.com';
-    } catch(e) {}
-    showPage('page-confirm');
+    // Show confirm page after short delay so Zelle opens first
+    setTimeout(function() { showPage('page-confirm'); }, 300);
+
+    // Return true so the anchor href fires and opens Zelle
+    return true;
   }
 
   /* ══════════════════════════
