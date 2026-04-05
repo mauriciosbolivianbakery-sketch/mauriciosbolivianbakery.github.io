@@ -72,8 +72,8 @@ html,body{background:#ffffff !important;color:#111111 !important;color-scheme:li
 .item-qty{font-weight:600;color:var(–accent);}
 .items-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px;}
 
-.order-btn{display:inline-flex;align-items:center;gap:9px;background:var(–black);color:#fff;border:none;font-family:‘Outfit’,sans-serif;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;padding:13px 26px;border-radius:100px;cursor:pointer;transition:all 0.2s ease;}
-.order-btn:hover{background:var(–gray-1);transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,0.15);}
+.order-btn{display:inline-flex;align-items:center;gap:9px;background:#111111 !important;color:#ffffff !important;border:none;font-family:‘Outfit’,sans-serif;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;padding:13px 26px;border-radius:100px;cursor:pointer;transition:all 0.2s ease;}
+.order-btn:hover{background:#333333 !important;transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,0.2);}
 .order-btn .arrow{transition:transform 0.2s;}
 .order-btn:hover .arrow{transform:translateX(4px);}
 
@@ -1113,14 +1113,10 @@ body.printing #panel-orders{display:block !important;}
     document.getElementById('confirm-address-text').textContent =
       'Your order is going to be ready to pick up at ' + selectedDate.label + ' at ' + PICKUP_ADDRESS + '. We will text you when the order is ready.';
 
-    // Open Zelle — only on real browser, not inside iframe/preview
+    // Open Zelle
     try {
-      if (window.self === window.top) {
-        var zelleUrl = 'zelle://'; 
-        var fallback = setTimeout(function(){ window.open('https://zellepay.com', '_blank'); }, 500);
-        window.location.href = zelleUrl;
-        setTimeout(function(){ clearTimeout(fallback); }, 1000);
-      }
+      var w = window.open('https://www.zellepay.com', '_blank');
+      if (!w) window.location.href = 'https://www.zellepay.com';
     } catch(e) {}
     showPage('page-confirm');
   }
